@@ -213,7 +213,7 @@ plsPredProbs<-predict(plsModel, newdata=trainX,type="prob")
 plsRoc<-multiclass.roc(response=trainY, predictor=plsPredProbs)
 auc(plsRoc) # 0.8067
 ```
-# Nonlinear Discriminant Analysis CHECK NAME OF THIS Do we need this. THIS ONE DOES NOT WORK. DO NOT INCLUDE THIS IN THE PROJECT
+# Nonlinear Discriminant Analysis CHECK NAME OF THIS Do we need this. THIS ONE DOES NOT WORK. 
 ```{r,echo=FALSE}
 set.seed(476)
 ctrl <- trainControl(summaryFunction = twoClassSummary,classProbs = TRUE)
