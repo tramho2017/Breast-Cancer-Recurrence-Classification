@@ -1,0 +1,628 @@
+---
+title: "5790 Project"
+output: html_document
+date: "2023-08-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+NEED to PPREDICT ON THE TRAINING SET
+```{r}
+#library(doParallel)
+library(e1071)
+library(caret)
+library(recipes)
+library(VIM)
+library(MLmetrics)
+library(pROC)
+library(mda)
+library(kernlab)
+library(pamr)
+library(klaR)
+ncores<-8
+cl<-makePSOCKcluster(ncores)
+registerDoParallel(cl)
+
+```
+# Reading Data
+```{r}
+data<-read.csv("C:/Users/tramh/iCloudDrive/Documents/MA 5790 Predictive Statistic/Project/Project 2/breast-cancer-data.csv")
+  data
+  dim(data)
+
+# Creating dummy Variables
+simple<-dummyVars(class~age+menopause+tumer.size+inv.nodes+node.caps+deg.malig+breast+breast.quad+irradiate,data=data)
+data1<-predict(simple,data)
+dim(data1) #286  43
+str(data1)
+data$class
+unique(data$class)
+y<-c()
+y[which(data$class=="recurrence-events'") ]=1
+y[which(data$class=="no-recurrence-events'") ]=0
+y
+table(y)
+```
+#Analysing and graph data
+```{r}
+# Barplots of categorical predictors
+a<-colnames(data1)
+data1[,1]
+dim(data1)
+
+# for (i in 1:10){
+# plot(data1[,i],y, ylab="churn")
+# }
+# plot(data1[,1:10],y, ylab="churn")
+# data1[,1:10]
+
+names<-colnames(data1)
+dim(data1)# 286  43
+plot.new()
+par(mfrow=c(5,4))
+
+
+for (i in 1:20){
+counts<-table(data1[,i])
+pl<-barplot(counts,main=names[i])
+}
+
+plot.new()
+par(mfrow=c(6,4))
+
+for (i in 21:43){
+counts<-table(data1[,i])
+pl<-barplot(counts,main=names[i])
+}
+
+# Barplot of response
+plot.new()
+tableY<-table(y)
+barplot(tableY, main="The Distribution of Response Variable")
+```
+#Preprocessing Data
+```{r}
+heatmap(cor(data1), main="Heatmap of Variable Correlations \n before Transformation")
+apply(data1,2 ,skewness)
+n<-nearZeroVar(data1,freqCut=95/5)
+length(n)
+data2<-data1[,-n]
+str(data2)
+dim(data2)
+trans1<-kNN(data2,imp_var=FALSE)
+str(trans1)
+corre<-cor(trans1)
+heatmap(corre, main="Heatmap of Variable  Correlations")
+t<-findCorrelation(corre,cutoff=0.8)
+length(t)
+data3<-trans1[,-t]
+apply(data3,2 ,skewness)
+trans<-preProcess(data3,method=c("BoxCox","center","scale"))
+data4<-predict(trans,data3)
+apply(data4,2 ,skewness)
+data5<-spatialSign(data4)
+
+apply(data5,2 ,skewness)
+apply(data5,2 ,skewness)
+dim(data5) # 286  26
+str(data5)
+heatmap(cor(data5), main="Heatmap of Correlations \n after Transformation")
+```
+
+#Splititng Data
+```{r,echo=FALSE}
+y1<-c()
+y1[which(y==0)]<-"Class1"
+y1[which(y==1)]<-"Class2"
+
+unique(y1)
+y2<-factor(y1,labels=c('Class1','Class2'))
+set.seed(123)
+index<-createDataPartition(y,p=0.8,list=FALSE)
+length(index)
+trainX<-data5[index,]
+dim(trainX)
+trainY<-y2[index]
+testX<-data5[-index,]
+testY<-y2[-index]
+length(trainY) #229
+length(testY) # 57
+dim(trainX) #229  26
+dim(testX) #57 26
+str(trainY)
+```
+
+## Buiding Model
+### Logistic Regression
+```{r}
+library(caret)
+set.seed(1)
+ctrl <- trainControl(method = "LGOCV",
+summaryFunction = twoClassSummary,
+classProbs = TRUE,
+##index = list(simulatedTest[,1:4]),
+savePredictions = TRUE)
+set.seed(123)
+lModel <- train(trainX,
+y = trainY,
+method = "glm",
+metric = "ROC",
+# preProc=c("center","scale","pca")
+trControl = ctrl)
+#plot(lModel)
+# predict on training set
+#Predict on the training set
+LoPred<-predict(lModel, trainX)
+postResample(pred=LoPred,obs=trainY)
+confusionMatrix(lModel$pred$pred,lModel$pred$obs)
+LPredProbs<-predict(lModel, newdata=trainX,type="prob")
+LFullRoc<-multiclass.roc(response=trainY, predictor=LPredProbs)
+auc(LFullRoc)# 0.8149
+
+
+```
+
+##LDA THIS IS OK
+```{r,echo=FALSE}
+
+ctrl <- trainControl(method = "LGOCV",summaryFunction =twoClassSummary,classProbs = TRUE,savePredictions = TRUE)
+LDATrain <- train(x=trainX,trainY,method = "lda", metric = "auc", trControl = ctrl)
+#Predict on the training set
+LPred<-predict(LDATrain, trainX)
+postResample(pred=LPred,obs=trainY)
+confusionMatrix(LDATrain$pred$pred,LDATrain$pred$obs)
+#confusionMatrix(LPred,trainY)
+LPredProbs<-predict(LDATrain, newdata=trainX,type="prob")
+FullRoc<-multiclass.roc(response=trainY, predictor=LPredProbs)
+auc(FullRoc)# 0.8149
+
+#Predict of test set
+LDAPred<-predict(LDATrain, testX)
+postResample(pred=LDAPred,obs=testY)
+confusionMatrix(LDAPred,testY)
+LDAPredProbs<-predict(LDATrain, newdata=testX,type="prob")
+# FullRoc<-multiclass.roc(response=testY, predictor=LDAPredProbs)
+# auc(FullRoc)# 0.6647
+```
+## PLSDA 
+```{r,echo=FALSE}
+library(caret)
+set.seed(1)
+dim(trainX)
+ctrl <- trainControl(method = "LGOCV",summaryFunction =twoClassSummary,classProbs = TRUE,savePredictions = TRUE)
+plsModel <- train(x = trainX,
+y = trainY,
+method = "pls",
+tuneGrid = expand.grid(.ncomp = 1:26),
+preProc = c("center","scale"),
+metric = "auc",
+trControl = ctrl)
+plsModel
+plot.new()
+par(mfrow=c(1,1))
+
+plot(plsModel,main="Area Under the Curve Per Additional Component with PLSDA Model")
+
+# predict on training set
+pred<-predict(plsModel,trainX)
+confusionMatrix(plsModel$pred$pred,plsModel$pred$obs)
+confusionMatrix(pred,trainY)
+predYes<-predict(PLS,trainX,type="prob")
+plsPredProbs<-predict(plsModel, newdata=trainX,type="prob")
+plsRoc<-multiclass.roc(response=trainY, predictor=plsPredProbs)
+auc(plsRoc) # 0.8067
+```
+# Nonlinear Discriminant Analysis CHECK NAME OF THIS Do we need this. THIS ONE DOES NOT WORK. DO NOT INCLUDE THIS IN THE PROJECT
+```{r,echo=FALSE}
+set.seed(476)
+ctrl <- trainControl(summaryFunction = twoClassSummary,classProbs = TRUE)
+ctrl <- trainControl(method = "repeatedcv",number = 10, repeats = 5,classProbs = TRUE, savePredictions = TRUE)
+mdaTune <- train(x = data.frame(trainX),
+y = trainY,
+method = "mda",
+metric = "ROC",
+tuneGrid = expand.grid(.subclasses = 1:2),
+trControl = ctrl)
+str(data.frame(trainX))
+apply(trainX,2,FUN=is.na)
+f<-function(x){
+a<-(which(x=='?')==TRUE)
+return(a)
+}
+apply(trainX,2,FUN=f)
+str(trainX)
+str(trainY)
+which((trainX[,1]=='?')==TRUE)
+summary(trainX)
+trainX[,1]
+warnings()
+mdaTune
+mdaTune$results$Accuracy
+mdaTune$modelInfo
+plot(mdaTune)
+mdaPred<-predict(mdaTune, testX)
+mdaPerform<-postResample(pred=mdaPred,obs=testY)
+confusionMatrix(mdaPred,testY)
+mdaPredProbs<-predict(mdaTune, newdata=testX,type="prob")
+mdaRoc<-multiclass.roc(response=testY, predictor=mdaPredProbs)
+auc(mdaRoc) #0.5181
+```
+
+#Penalized Model, THIS IS OKAY
+```{r}
+library(caret)
+library(pROC)
+ctrl <- trainControl(method = "LGOCV",
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE,
+                     ##index = list(simulatedTest[,1:4]),
+                     savePredictions = TRUE)
+
+glGrid <- expand.grid(.alpha = c(0, .1, .2, .4, .6, .8, 1),
+                        .lambda = seq(.01, .2, length = 40))
+set.seed(476)
+glTune<- train(x=trainX,
+                   y = trainY,
+                   method = "glmnet",
+                   tuneGrid = glGrid,
+                   preProc = c("center", "scale"),
+                   metric = "auc",
+                   trControl = ctrl)
+glTune
+plot(glTune)
+glTune$results$Accuracy
+plot(glTune,main="Tuning Parameters of Logistic Model")
+
+#Predict on the training set:
+gPred<-predict(glTune, trainX)
+postResample(pred=gPred,obs=trainY)
+confusionMatrix(glTune$pred$pred,glTune$pred$obs)
+confusionMatrix(gPred,trainY)
+gPredProbs<-predict(glTune, newdata=trainX,type="prob")
+gRoc<-multiclass.roc(response=trainY, predictor=gPredProbs)
+auc(gRoc)#0.804
+
+
+#Predict on the test set:
+glPred<-predict(glTune, testX)
+postResample(pred=glPred,obs=testY)
+confusionMatrix(glPred,testY)
+glPredProbs<-predict(glTune, newdata=testX,type="prob")
+glRoc<-multiclass.roc(response=testY, predictor=glPredProbs)
+auc(glRoc)#0.5726
+ 
+```
+
+# SVM. THIS IS OK
+```{r}
+
+ctrl <- trainControl(summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+sigma <- sigest(as.matrix(trainX))
+svmRGrid <- expand.grid(.sigma = sigma[1],
+                                 .C = 2^(seq(-2, 7)))
+
+svmModel <- train(x = trainX, 
+                   y = trainY,
+                   method = "svmRadial",
+                   metric = "auc",
+                   preProc = c("center", "scale"),
+                   tuneGrid = svmRGrid,
+                   fit = FALSE,
+                   trControl = ctrl)
+svmModel
+summary(svmModel)
+plot(svmModel, main=" Tuning Parameters of\n Support Vector Machine Model ")
+
+#Predict on the training set:
+sPred <- predict(svmModel, newdata = trainX,type="raw")
+
+confusionMatrix(data = sPred,reference =trainY)
+sPredProbs<-predict(svmModel, newdata=trainX,type="prob")
+sRoc<-multiclass.roc(response=trainY, predictor=sPredProbs)
+auc(sRoc) #0.819
+
+#Predict on the test set:
+svmPred <- predict(svmModel, newdata = testX,type="raw")
+confusionMatrix(data = svmPred,reference =testY)
+svmPredProbs<-predict(svmModel, newdata=testX,type="prob")
+svmRoc<-multiclass.roc(response=testY, predictor=svmPredProbs)
+auc(svmRoc) #0.7151
+
+varImp(svmModel)
+```
+
+
+#Flexible Discriminant Analysis. THIS IS OK. NEED TO INCREASE AUC
+```{r}
+marsGrid <- expand.grid(.degree = 1:2, .nprune = 2:30)
+fdaTuned <- train(x = trainX, 
+                   y = trainY,
+                   method = "fda",
+                   preProcess = c("center", "scale"),
+                   # Explicitly declare the candidate models to test
+                   tuneGrid = marsGrid,
+                   trControl = trainControl(method = "cv"))
+warnings()
+fdaTuned
+plot(fdaTuned, main="Tuning Parameters of \n Flexible Discriminant Analysis Model ")
+
+#Predict on the training set:
+fPred <- predict(fdaTuned, newdata = trainX,type="raw")
+#confusionMatrix(fdaTuned$pred$pred,fdaTuned$pred$obs)
+confusionMatrix(data = fPred,reference =trainY)
+fPredProbs<-predict(fdaTuned, newdata=trainX,type="prob")
+fRoc<-multiclass.roc(response=trainY, predictor=fPredProbs)
+auc(fRoc) #   0.7755
+
+fdaPred <- predict(fdaTuned, newdata = testX,type="raw")
+confusionMatrix(data = fdaPred,reference =testY)
+fdaPredProbs<-predict(fdaTuned, newdata=testX,type="prob")
+fdaRoc<-multiclass.roc(response=testY, predictor=fdaPredProbs)
+auc(fdaRoc) # 
+```
+
+##Multinomial Logistic Regression. THIS IS OK. This is for more than 2 classes
+```{r, echo=FALSE}
+ctrl <- trainControl(summaryFunction = twoClassSummary,
+                     classProbs = TRUE) 
+MTune<- train(x=trainX,
+                   y = trainY,
+                   method = "multinom",
+                   tuneLength=4,
+                   tuneGrid = data.frame(decay = c(0.01, 0.1, 1, 10)),
+                   preProc = c("center", "scale"),
+                   metric = "ROC",
+                   trControl = ctrl)
+MTune
+plot(MTune,main="Tuning Parameters of \n Multinomial Logistic Regression Model")
+     #plotType = "level")
+
+#Predict on the training set:
+mPred<-predict(MTune, trainX)
+postResample(pred=mPred,obs=trainY)
+confusionMatrix(mPred,trainY)
+mPredProbs<-predict(MTune, newdata=trainX,type="prob")
+mRoc<-multiclass.roc(response=trainY, predictor=mPredProbs)
+auc(mRoc)#0.8118
+
+
+#Predict on the test set:
+MTune$results$Accuracy
+MPred<-predict(MTune, testX)
+postResample(pred=MPred,obs=testY)
+confusionMatrix(MPred,testY)
+MPredProbs<-predict(MTune, newdata=testX,type="prob")
+MRoc<-multiclass.roc(response=testY, predictor=MPredProbs)
+auc(MRoc)#0.7308
+```
+
+
+
+#Neural Networks, THIS IS OK. NEED TO WRITE MORE CODE
+```{r}
+library(caret)
+Grid <- expand.grid(.size = 1:10, .decay = c(0, .1, .3, .5, 1))
+maxSize <- max(Grid$.size)
+dim(trainX) #229  26
+numWts <- (maxSize * (26 + 1) + (maxSize+1)*2) ## 26 is the number of predictors; 2 is the number of classes
+set.seed(476)
+ctrl <- trainControl(summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+nnetFit <- train(x = trainX, 
+                 y = trainY,
+                 method = "nnet",
+                 metric = "auc",
+                 preProc = c("center", "scale", "spatialSign"),
+                 tuneGrid = Grid,
+                 trace = FALSE,
+                 maxit = 2000,
+                 MaxNWts = numWts,
+                 trControl = ctrl)
+nnetFit
+plot(nnetFit,main="Tuning Parameters of \n Neural Networks Model")
+
+#Predict on the training set:
+nPred<-predict(nnetFit, trainX)
+postResample(pred=nPred,obs=trainY)
+#confusionMatrix(nnetFit$pred$pred,nnetFit$pred$obs)
+confusionMatrix(nPred,trainY)
+nPredProbs<-predict(nnetFit , newdata=trainX,type="prob")
+nRoc<-multiclass.roc(response=trainY, predictor=nPredProbs)
+auc(nRoc)#0.7997
+
+#Predict on the test set:
+nnPred<-predict(nnetFit, testX)
+postResample(pred=nnPred,obs=testY)
+confusionMatrix(nnPred,testY)
+nnPredProbs<-predict(nnetFit , newdata=testX,type="prob")
+nnRoc<-multiclass.roc(response=testY, predictor=nnPredProbs)
+auc(nnRoc)#0.7243
+
+```
+
+#KNN
+```{r}
+set.seed(123)
+ctrl<-trainControl(summaryFunction=twoClassSummary, classProbs=TRUE)
+knnTune <- train(x = trainX, 
+                y = trainY,
+                method = "knn",
+                metric = "auc",
+                preProc = c("center", "scale"),
+                ##tuneGrid = data.frame(.k = c(4*(0:5)+1, 20*(1:5)+1, 50*(2:9)+1)), ## 21 is the best
+                tuneGrid = data.frame(.k = 1:50),
+                trControl = ctrl)
+
+knnTune
+plot(knnTune,main="Tuning Parameters of KNN Model")
+
+#Predict on the training set:
+knnTune$results$Accuracy
+kPred<-predict(knnTune, trainX)
+postResample(pred=kPred,obs=trainY)
+confusionMatrix(kPred,trainY)
+kPredProbs<-predict(knnTune, newdata=trainX,type="prob")
+kRoc<-multiclass.roc(response=trainY, predictor=kPredProbs)
+auc(kRoc) # 0.7581
+
+#Predict on the test set:
+knnTune$results$Accuracy
+knnPred<-predict(knnTune, testX)
+postResample(pred=knnPred,obs=testY)
+confusionMatrix(knnPred,testY)
+knnPredProbs<-predict(knnTune, newdata=testX,type="prob")
+knnRoc<-multiclass.roc(response=testY, predictor=knnPredProbs)
+auc(knnRoc) # 0.7201 #0.6703
+```
+
+# Naive Bayes. THIS IS OK. NEED TO INCREASE AUC
+```{r}
+
+set.seed(123)
+
+nbTune <- train( x = trainX, 
+                y = trainY,
+                method = "naive_bayes",
+                metric = "ROC",
+                preProc = c("center", "scale"),
+                #tuneGrid =expand.grid(usekernel=TRUE, adjust=1,fL=c(0.2,0.5,0.8)),
+               # tuneGrid=data.frame(.fL = 2,.adjust=1,.usekernel = TRUE,.adjust = TRUE),
+                tuneGrid=data.frame(.laplace =c(0,0.5,1.0,2.0) ,.adjust=c(0,0.5,1.0,2.0),.usekernel = TRUE),
+               trControl = trainControl(method="cv",number=5,classProbs=TRUE,))
+
+nbTune
+plot.new()
+plot(nbTune,main="Tuning Parameters of \n Naive Bayes Model")
+
+#Predict on the training set:
+nPred<-predict(nbTune, trainX)
+postResample(pred=nPred,obs=trainY)
+confusionMatrix(nPred,trainY)
+nPredProbs<-predict(nbTune, newdata=trainX,type="prob")
+nRoc<-multiclass.roc(response=trainY, predictor=nPredProbs)
+auc(nRoc) # 0.8285
+
+#Predict on the test set:
+nbPred<-predict(nbTune, testX)
+postResample(pred=nbPred,obs=testY)
+confusionMatrix(nbPred,testY)
+nbPredProbs<-predict(nbTune, newdata=testX,type="prob")
+nbRoc<-multiclass.roc(response=testY, predictor=nbPredProbs)
+auc(nbRoc) #  0.7279
+
+```
+
+
+#Regularized Discriminant Analysis-RDA. length(rdaPred$class)# NEED TO FIX rdaCM, (I AM HERE). 
+```{r}
+set.seed(123)
+dataRDA<-data.frame(trainX,trainY)
+dim(dataRDA)
+str(dataRDA[,c(1:14)])
+rdaModel<-rda(trainY~trainX,data=dataRDA, prior=NULL, gamma=NA, lamda=NA, rgularization=c(gamma=gamma, lambda=lambda), crossval=TRUE, fold=10, train.fraction=0.5, estimate.error=TRUE, startsimplex=Null, max.iter=100, trafo=TRUE, simAnn=FALSE, schedule=1, T.start=0,1, halflife=50, zero.temp=0.01, appha=2)
+rdaModel
+#Misclassification rate: 
+ #      apparent: 48.444 %
+testRDA<-data.frame(testX,testY)
+str(testRDA)
+dim(testRDA)
+rdaPred<-predict(rdaModel,newdata= testRDA$testY,data=testRDA)
+rdaPerform<-postResample(pred=rdaPred$class,obs=testRDA$testY)
+confusionMatrix(rdaPred$class,testRDA$trainY) #Error: `data` and `reference` should be factors with the same levels.
+str(rdaPred)
+length(rdaPred$class)
+length(testRDA$testY)
+dim(testRDA)
+length(rdaPred$class)# 225 why this is 225. NEED TO FIGURE OUT WHY
+length(testRDA$testY)
+rdaPredProbs<-predict(rdaTrain, newdata=testX,type="prob")
+rdaPredProbs
+rdaRoc<-multiclass.roc(response=testY, predictor=rdaPredProbs)
+str(rdaRoc)
+plot(rdaRoc)# this is not working
+auc(rdaRoc)
+```
+
+# Nearest shrunken centriod. NEED TO PLOT ROC
+```{r}
+NSCGrid <- data.frame(.threshold = 0:10)
+set.seed(476)
+NSCTune <- train(x = trainX,
+y = trainY,
+method = "pam",
+preProc = c("center", "scale"),
+tuneGrid = NSCGrid,
+metric = "ROC",
+trControl = ctrl)
+pred<-predict(NSCTune,testX)
+testY
+confusionMatrix(NSCTune$pred,testY)
+NSCPredProbs<-predict(NSCTune, newdata=testX,type="prob")
+FullRoc<-multiclass.roc(response=testY, predictor=NSCPredProbs)
+NSCCM<-confusionMatrix(testY,pred)
+plot(FullRoc)
+auc(FullRoc)
+```
+
+#MARS
+```{r,echo=FALSE}
+  
+library(earth)
+marsModel<-earth(trainX,trainY)
+marsModel
+summary(marsModel)
+#evimp(marsCheTrain)
+marsGridChe <- expand.grid(.degree = 1:2, .nprune = 2:50)  
+marsTuned <- train(trainX, trainY,method = "earth",tuneGrid = marsGrid,trControl = trainControl(method = "cv"))
+marsTuned
+summary(marsTuned)
+plot(marsTuned, main="Tuning Parameter of MARS Model")
+
+# predict on training set
+marPred<-predict(marsTuned,trainX)
+ValuesTuned<-data.frame(obs=trainY,pred=marPred)
+defaultSummary(ValuesTuned)
+
+#Predict on the test set:
+
+```
+ SVM
+```{r,echo=FALSE}
+#SVM 
+library(kernlab)
+set.seed(202)
+ctrl <- trainControl(summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+sigmaRangeReduced <- sigest(as.matrix(trainX))
+svmRGridReduced <- expand.grid(.sigma = sigmaRangeReduced[1],
+                                 .C = 2^(seq(-2, 6)))
+
+svmRTuned <- train(x = trainX, 
+                   y = trainY,
+                   method = "svmRadial",
+                   metric = "AUC",
+                   preProc = c("center", "scale"),
+                   tuneGrid = svmRGridReduced,
+                   fit = FALSE,
+                   trControl = ctrl)
+svmRTuned
+min(svmRTuned$results$RMSE)
+svmRTuned$results$C
+
+plot(svmRTuned,xlim=c(0,50), main="Support Vector Machhine Model")
+
+# predict on training set
+svmPred<-predict(svmRTuned,trainX)
+ValuesTuned<-data.frame(obs=trainY,pred=svmPred)
+defaultSummary(ValuesTuned)
+confusionMatrix(svmPred,trainY)
+svmPredProbs<-predict(svmRTuned, newdata=trainX,type="prob")
+svmRoc<-multiclass.roc(response=trainY, predictor=svmPredProbs)
+auc(svmRoc) # 0.8858
+
+
+svmPred
+```
