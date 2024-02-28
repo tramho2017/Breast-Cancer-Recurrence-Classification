@@ -27,7 +27,7 @@ registerDoParallel(cl)
 ```
 # Reading Data
 ```{r}
-data<-read.csv("C:/Users/tramh/iCloudDrive/Documents/MA 5790 Predictive Statistic/Project/Project 2/breast-cancer-data.csv")
+data<-read.csv("breast-cancer-data.csv")
   data
   dim(data)
 
